@@ -1,5 +1,6 @@
 # Makefile
 CC = gcc
+
 CFLAGS = -Wall -Wextra -Wshadow -Wunreachable-code -Wredundant-decls -Wmissing-declarations -Wold-style-definition -Wmissing-prototypes -Wdeclaration-after-statement -Wno-return-local-addr -Wunsafe-loop-optimizations -Wuninitialized -Werror -Wno-unused-parameter -pthread
 LDFLAGS = -lcrypt
 

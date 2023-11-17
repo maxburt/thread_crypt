@@ -1,3 +1,6 @@
+//Lab 3 for CS 333
+//by Max Burt 11/17/23
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <pthread.h>
@@ -8,8 +11,10 @@
 #include "thread_crypt.h"
 
 void print_help(void);
-void process(const char * input_file, char * output_file, int algorithm, int salt_length);
-char * create_setting(int algorithm, int salth_length);
+void process(const char * input_file, char * output_file, int algorithm, int salt_length, int rounds);
+char * create_setting(int algorithm, int salth_length, int rounds);
+
+static int verbose = 0;
 
 int main(int argc, char *argv[]) {
 	int opt;
@@ -20,7 +25,6 @@ int main(int argc, char *argv[]) {
     	int rounds = 5000; 
     	long seed = 0; 
     	int num_threads = 1;
-    	int verbose = 0;
 	
 	// Parse command line options using getopt()
  	while ((opt = getopt(argc, argv, "i:o:a:l:r:R:t:vh")) != -1) {
@@ -73,13 +77,13 @@ int main(int argc, char *argv[]) {
 	if (seed < 0) seed = 0;
 	
 	if (output_file == NULL && verbose == 1) {
-		fprintf(stderr, "outputting to stdout\n");
+		fprintf(stderr, "Outputting to stdout\n");
 	}
 	
 	srand((unsigned int)seed);
 
        	//process the input file and send it to output file	
-    	process(input_file, output_file, algorithm, salt_length);
+    	process(input_file, output_file, algorithm, salt_length, rounds);
     
 	
 	//Implement multi-threading for enhanced performance
@@ -103,13 +107,18 @@ void print_help(void) {
 }
 
 //returns a malloc'ed "setting" value for running crypt function
-char * create_setting(int algorithm, int salt_length) {
+char * create_setting(int algorithm, int salt_length, int rounds) {
 	
 	int pref_length = 0;
-	int idx = 0;
+	int idx;
+	int idx2;
 	char * setting = "";
 	char * prefix = "";
-
+	char str_rounds[15];	//holds string for rounds
+	int str_rounds_length = 0;
+	int setting_length = 0;
+	
+	//determine prefix
 	if (algorithm == 0) prefix = "";
         else if (algorithm == 1) prefix = "$1$";
         else if (algorithm == 5) prefix = "$5$";
@@ -119,34 +128,80 @@ char * create_setting(int algorithm, int salt_length) {
                 exit(EXIT_FAILURE);
         }
 
+	//length of prefix
 	pref_length = strlen(prefix);
 
-	//default salt length set to -1
-	if (algorithm == 0 && (salt_length < 0 || salt_length > 2)) salt_length = 2;
-	else if (algorithm == 1 && (salt_length < 0 || salt_length > 8)) salt_length = 8;
-	else if (algorithm == 5 && (salt_length < 0 || salt_length > 16)) salt_length = 16;
-	else if (algorithm == 6 && (salt_length < 0 || salt_length > 16)) salt_length = 16;
+	//converts int rounds value to string	5000 -> "5000"
+        snprintf(str_rounds, sizeof(str_rounds), "%d", rounds);
 	
-	//allocates space for prefix plus salt
-	setting = malloc(pref_length + salt_length + 1);
+	str_rounds_length = strlen(str_rounds);
+
+	str_rounds[str_rounds_length] = '$';	//5000 -> 5000$
+						//
+	str_rounds[str_rounds_length + 1] = '\0';	//null terminate string
+
+	str_rounds_length = strlen(str_rounds);	
+
+	//calculate length for the setting
+	if (algorithm == 0) {
+		if (salt_length < 0 || salt_length > 2) salt_length = 2;
+		setting_length = pref_length + salt_length;
+	}
+	else if (algorithm == 1) {
+		if (salt_length < 0 || salt_length > 8) salt_length = 8;
+		setting_length = pref_length + salt_length;
+	}
+	else if (algorithm == 5 || algorithm == 6) {
+		if (salt_length < 0 || salt_length > 16) salt_length = 16;
+		setting_length = pref_length + 7 /*"rounds=*/ + str_rounds_length + salt_length; //3 + 7 + 5 + 16 = 31
+	}
 	
-	//set first characters to prefix
+	//allocates space for prefix + salt + null character
+	setting = malloc(setting_length + 1);
+
+	//idx is index for setting char array
+	idx = 0;	
+
+	//set prefix chars
 	while (idx < pref_length) {
 		setting[idx] = prefix[idx];
 		idx++;
 	}
-	//set rest of characters to salt
-	while (idx < salt_length + pref_length) {
+
+	if (algorithm == 5 || algorithm == 6) {
+		char * add1 = "rounds=";
+		idx2 = 0;
+
+		//add rounds=
+		while (idx < pref_length + 7) {
+			setting[idx] = add1[idx2];
+			idx++;
+			idx2++;
+		}
+		idx2 = 0;
+
+		//e.g. adds 5000$
+		while (idx < pref_length + 7 + str_rounds_length) {
+			setting[idx] = str_rounds[idx2];
+			idx++;
+			idx2++;
+		}
+	}
+
+	//add random salt chars
+	while (idx < setting_length) {
 		setting[idx] = SALT_CHARS[rand() % (strlen(SALT_CHARS))];
 		idx++;
 	}
 
+	//null terminate string
 	setting[idx] = '\0';
 	return setting;
 }
 
-void process(const char * input_file, char * output_file, int algorithm, int salt_length) {
+void process(const char * input_file, char * output_file, int algorithm, int salt_length, int rounds) {
 	FILE * file = fopen(input_file, "r");		
+	FILE * out_file = NULL;
 	char * setting = "";
        	char line[256]; // buffer for lines of input_file
 	char result[512]; // buffer for hashed outputs
@@ -156,6 +211,17 @@ void process(const char * input_file, char * output_file, int algorithm, int sal
         	perror("Error opening input file");
         	exit(EXIT_FAILURE);
     	}
+
+	//open output file, if given at command line
+	if (output_file != NULL) out_file = fopen(output_file, "w");
+
+        if (output_file != NULL && out_file == NULL) {
+                perror("Error opening output file");
+                exit(EXIT_FAILURE);
+        }
+	else if (out_file != NULL && verbose == 1) {
+		printf("Outputting data to file: %s\n", output_file);
+	}
 
     	data.initialized = 0;
 	
@@ -168,8 +234,7 @@ void process(const char * input_file, char * output_file, int algorithm, int sal
             		line[len - 1] = '\0';
         	}
 
-		setting = create_setting(algorithm, salt_length);	//salt is malloced and appropriate prefix is added
-
+		setting = create_setting(algorithm, salt_length, rounds);	//salt is malloced and appropriate prefix is added
         	hashed_password = crypt_rn(line, setting, &data, (int)sizeof(data));
 	
 		if (hashed_password == NULL) {
@@ -179,12 +244,13 @@ void process(const char * input_file, char * output_file, int algorithm, int sal
         
 		// Print the plaintext password and the corresponding hashed password
         	snprintf(result, sizeof(result), "%s:%s", line, hashed_password);
-        	printf("%s\n", result);
+        	
+		if (output_file == NULL) printf("%s\n", result);
+		else fprintf(out_file, "%s\n", result);
 
 		free(setting);
 		setting = "";
     	}	
+	fclose(file);
+	if (out_file) fclose(out_file);
 }
-
-//make new crypto here
-//GOONCOIN

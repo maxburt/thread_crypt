@@ -8,13 +8,34 @@
 #include <getopt.h>
 #include <crypt.h>
 #include <string.h>
+#include <pthread.h>
 #include "thread_crypt.h"
 
+//prints helpful text
 void print_help(void);
-void process(const char * input_file, char * output_file, int algorithm, int salt_length, int rounds);
+
+//function that gets called in main
+void process(const char * input_file, char * output_file, int algorithm, int salt_length, int rounds, int num_threads);
+
+//creates setting value with prefix, rounds, salt, etc.
 char * create_setting(int algorithm, int salth_length, int rounds);
 
+//function that each thread executes
+void * threadFunction(void * arg);
+
+//the data which every thread needs to execute the crypt function
+//and output result
+struct thread_data {
+	FILE * in_file;
+	FILE * out_file;
+	int algorithm;
+	int salt_length;
+	int rounds;
+};
+
 static int verbose = 0;
+
+pthread_mutex_t rand_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 int main(int argc, char *argv[]) {
 	int opt;
@@ -71,23 +92,15 @@ int main(int argc, char *argv[]) {
 		exit(EXIT_FAILURE);	
 	}
 	if (verbose == 1) {
-		fprintf(stderr, "Running thread_crypt...\n");
+		fprintf(stderr, "Rounds = %d\n", rounds);
 	}
 	
 	if (seed < 0) seed = 0;
 	
-	if (output_file == NULL && verbose == 1) {
-		fprintf(stderr, "Outputting to stdout\n");
-	}
-	
 	srand((unsigned int)seed);
 
-       	//process the input file and send it to output file	
-    	process(input_file, output_file, algorithm, salt_length, rounds);
+    	process(input_file, output_file, algorithm, salt_length, rounds, num_threads);
     
-	
-	//Implement multi-threading for enhanced performance
-
     return 0;
 }
 
@@ -103,12 +116,10 @@ void print_help(void) {
 	printf("\t-t #\t\tnumber of threads to create (default 1)\n");
 	printf("\t-v\t\tenable verbose mode\n");
 	printf("\t-h\t\thelpful text\n");
-
 }
 
 //returns a malloc'ed "setting" value for running crypt function
 char * create_setting(int algorithm, int salt_length, int rounds) {
-	
 	int pref_length = 0;
 	int idx;
 	int idx2;
@@ -142,7 +153,7 @@ char * create_setting(int algorithm, int salt_length, int rounds) {
 
 	str_rounds_length = strlen(str_rounds);	
 
-	//calculate length for the setting
+	//calculate length of salt and setting
 	if (algorithm == 0) {
 		if (salt_length < 0 || salt_length > 2) salt_length = 2;
 		setting_length = pref_length + salt_length;
@@ -199,58 +210,121 @@ char * create_setting(int algorithm, int salt_length, int rounds) {
 	return setting;
 }
 
-void process(const char * input_file, char * output_file, int algorithm, int salt_length, int rounds) {
-	FILE * file = fopen(input_file, "r");		
+void process(const char * input_file, char * output_file, int algorithm, int salt_length, int rounds, int num_threads) {
+	FILE * in_file = NULL;	
 	FILE * out_file = NULL;
-	char * setting = "";
-       	char line[256]; // buffer for lines of input_file
-	char result[512]; // buffer for hashed outputs
-	struct crypt_data data;
+	struct thread_data thread_info;
+	pthread_t threads[num_threads];
+
+	//step 1 OPEN in and  out files
 	
-	if (file == NULL) {
+	in_file = fopen(input_file, "r");
+
+	if (in_file == NULL) {
         	perror("Error opening input file");
         	exit(EXIT_FAILURE);
     	}
 
-	//open output file, if given at command line
-	if (output_file != NULL) out_file = fopen(output_file, "w");
+	if (output_file != NULL) {
+		out_file = fopen(output_file, "w");
+		if (out_file == NULL) {
+			perror("Error opening output file");
+               	 	exit(EXIT_FAILURE);
+		}
+		else if (verbose == 1) {
+			printf("Outputting data to file: %s\n", output_file);
+		}
+	}
+	
+        thread_info.in_file = in_file;
+        thread_info.out_file = out_file;
+        thread_info.algorithm = algorithm;
+        thread_info.salt_length = salt_length;
+        thread_info.rounds = rounds;
 
-        if (output_file != NULL && out_file == NULL) {
-                perror("Error opening output file");
-                exit(EXIT_FAILURE);
-        }
-	else if (out_file != NULL && verbose == 1) {
-		printf("Outputting data to file: %s\n", output_file);
+	if (verbose == 1) {
+		fprintf(stderr, "Threads spun up\n");
 	}
 
-    	data.initialized = 0;
-	
-	while (fgets(line, sizeof(line), file) != NULL) {
-        	size_t len = strlen(line);
-        	char * hashed_password = NULL;
-
-		// Remove newline character from the end of the line
-		if (line[len - 1] == '\n') {
-            		line[len - 1] = '\0';
-        	}
-
-		setting = create_setting(algorithm, salt_length, rounds);	//salt is malloced and appropriate prefix is added
-        	hashed_password = crypt_rn(line, setting, &data, (int)sizeof(data));
-	
-		if (hashed_password == NULL) {
-    			fprintf(stderr, "Error in crypt_rn\n");
+	//Step 2 create all the threads
+	for (int i = 0; i < num_threads; ++i) {
+        	if (pthread_create(&threads[i], NULL, threadFunction, (void *)&thread_info) != 0) {
+			perror("Error creating threads\n");
 			exit(EXIT_FAILURE);
 		}
-        
-		// Print the plaintext password and the corresponding hashed password
-        	snprintf(result, sizeof(result), "%s:%s", line, hashed_password);
-        	
-		if (output_file == NULL) printf("%s\n", result);
-		else fprintf(out_file, "%s\n", result);
+	}
 
-		free(setting);
-		setting = "";
-    	}	
-	fclose(file);
+	//Step 3 join threads after they finish
+	for (int i = 0; i < num_threads; ++i) {
+		if (pthread_join(threads[i], NULL) != 0) {
+			perror("Error joining threads\n");
+			exit(EXIT_FAILURE);
+		}
+	}
+	if (verbose == 1) {
+        	fprintf(stderr, "Threads joined\n");
+        }
+
+	fclose(in_file);
 	if (out_file) fclose(out_file);
 }
+
+void * threadFunction(void * arg) {
+	struct thread_data * thread_info = (struct thread_data *) arg;
+	char * hashed_password = "";	
+	char * setting = "";		// holds setting i.e. (password:$5$rounds=5000$fhkndjbkflsahs3$)
+        char line[256];			// buffer for getting lines from file
+        struct crypt_data data;
+	data.initialized = 0;
+
+	while (1) {
+		size_t len;
+	
+		//start mutex lock because i want each line to be read and
+		//setting to be generated together without interruption	
+		pthread_mutex_lock(&rand_mutex);
+		
+		//read line from thread_info->in_file
+		if (fgets(line, sizeof(line), thread_info->in_file) == NULL) {
+			pthread_mutex_unlock(&rand_mutex);	//if file is empty, unlock mutex and break out of loop
+			break;
+		} 
+
+		//generate setting, setting is malloced'
+		setting = create_setting(thread_info->algorithm, thread_info->salt_length, thread_info->rounds);
+		
+		pthread_mutex_unlock(&rand_mutex);	//unlock mutex after setting is created
+		
+		len = strlen(line);
+
+                // Remove newline character from the end of the line
+                if (line[len - 1] == '\n') {
+                        line[len - 1] = '\0';
+                }
+	
+		//add values to crypt_data struct
+		strcpy(data.setting, setting);
+		strcpy(data.input, line);
+
+               	hashed_password = crypt_rn(line, setting, &data, (int)sizeof(data));
+		
+               	if (hashed_password == NULL) {
+                       	fprintf(stderr, "Error in crypt_rn\n");
+                       	exit(EXIT_FAILURE);
+                }
+
+		//output result
+               	if (thread_info->out_file == NULL) {	// stdout
+			printf("%s:%s\n", data.input, data.output);
+		}
+                else { 					//output to file
+			fprintf(thread_info->out_file, "%s:%s\n", data.input, data.output);
+		}
+
+		//free setting and reset strings to NULL
+               	free(setting);
+               	setting = "";
+		hashed_password = "";
+        }
+	pthread_exit(NULL);
+} 

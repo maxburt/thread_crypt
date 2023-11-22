@@ -1,12 +1,12 @@
 CC = gcc
 DEBUG = -g
 DEFINES =
-CFLAGS = $(DEBUG) -I/u/rchaney/Classes/cs333/Labs/Lab3 -Wall -Wextra -Wshadow -Wunreachable-code \
+CFLAGS = $(DEBUG) -Wall -Wextra -Wshadow -Wunreachable-code \
 	 -Wredundant-decls -Wmissing-declarations -Wold-style-definition -Wmissing-prototypes \
 	 -Wdeclaration-after-statement -Wno-return-local-addr -Wunsafe-loop-optimizations \
 	 -Wuninitialized -Werror -Wno-unused-parameter -pthread
 LDFLAGS = -lcrypt
-INCLUDES = /u/rchaney/Classes/cs333/Labs/Lab3/thread_crypt.h
+INCLUDES = thread_crypt.h
 PROG = thread_crypt
 
 all: $(PROG)

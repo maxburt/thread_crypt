@@ -1,17 +1,25 @@
-# Makefile
 CC = gcc
-
-CFLAGS = -Wall -Wextra -Wshadow -Wunreachable-code -Wredundant-decls -Wmissing-declarations -Wold-style-definition -Wmissing-prototypes -Wdeclaration-after-statement -Wno-return-local-addr -Wunsafe-loop-optimizations -Wuninitialized -Werror -Wno-unused-parameter -pthread
+DEBUG = -g
+DEFINES =
+CFLAGS = $(DEBUG) -I/u/rchaney/Classes/cs333/Labs/Lab3 -Wall -Wextra -Wshadow -Wunreachable-code \
+	 -Wredundant-decls -Wmissing-declarations -Wold-style-definition -Wmissing-prototypes \
+	 -Wdeclaration-after-statement -Wno-return-local-addr -Wunsafe-loop-optimizations \
+	 -Wuninitialized -Werror -Wno-unused-parameter -pthread
 LDFLAGS = -lcrypt
+INCLUDES = /u/rchaney/Classes/cs333/Labs/Lab3/thread_crypt.h
+PROG = thread_crypt
 
-all: thread_crypt
+all: $(PROG)
 
-thread_crypt: thread_crypt.o
+$(PROG): $(PROG).o
 	$(CC) -o $@ $^ $(LDFLAGS)
 
-thread_crypt.o: thread_crypt.c thread_crypt.h
+$(PROG).o: $(PROG).c $(INCLUDES)
 	$(CC) -c $(CFLAGS) -o $@ $<
 
-clean:
-	rm -f thread_crypt thread_crypt.o
+tar:
+	tar cvfa Lab3_${LOGNAME}.tar.gz *.[ch] [mM]akefile
+
+clean cls:
+	rm -f $(PROG) *.o *~ \#*
 
